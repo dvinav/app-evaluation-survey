@@ -84,7 +84,7 @@ See [.env.example](.env.example) for all configuration. `.env` is ignored by Git
 | `SUBMISSION_RATE_LIMIT`                             | Submission attempts per ten minutes; defaults to 30 per trusted IP or 300 installation-wide.                                                              |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME`       | Temporary bootstrap-script inputs; password must be at least 16 characters.                                                                               |
 | `TEST_DATABASE_URL`                                 | Disposable integration database URL whose database name ends in `_test`. **The integration suite resets its public schema.**                              |
-| `APP_IMAGE`, `MIGRATION_IMAGE`                      | Production application image and matching maintenance image, respectively; support separate immutable digests.                                            |
+| `APP_IMAGE`, `APP_VERSION`                          | Production image repository and immutable tag; the matching maintenance tag adds `-migrations`.                                                           |
 
 ## Development and tests
 
@@ -140,9 +140,9 @@ Scores are descriptive means of separately reverse-adjusted answers, first per r
 
 ## Deployment
 
-Use the [deployment guide](docs/DEPLOYMENT.md) for local Docker builds, GHCR image publication, production Compose, administrator setup, migrations, encrypted backups, restoration, and pull/restart updates. Production uses a non-root Node.js standalone image and persistent database/media volumes. Maintenance runs from a separate matching image, before application startup.
+Use the [deployment guide](docs/DEPLOYMENT.md) for local Docker builds, GHCR image publication, production Compose, administrator setup, migrations, encrypted backups, restoration, and pull/restart updates. Production uses a non-root Node.js standalone image and persistent database/media volumes. Maintenance runs from a separate matching image, before application startup. The production Compose file joins Uranus’s existing `proxy` and `database` networks, uses its shared PostgreSQL service, and exposes the application through Caddy at `https://uiux-survey.dvinav.ir`.
 
-The CI workflow checks formatting, lint, types, unit and database tests, production build, and Chromium flows. The publishing workflow runs on `main` and `v*` tags with restricted package-write permissions and verified commit-pinned actions. It publishes application and maintenance tags; no deployment host or SSH secrets are assumed.
+The CI workflow checks formatting, lint, types, unit and database tests, production build, and Chromium flows. The publishing workflow runs on `main` and `v*` tags with restricted package-write permissions and verified commit-pinned actions. It builds PR images without publishing, publishes paired application/maintenance images on `main`, version tags, or manual runs, and automatically deploys only pushes to `main` over SSH. Repository variables select the host/user and pin its SSH host key; `SURVEY_DEPLOY_SSH_KEY` supplies the dedicated deployment key. Deployment mirrors Imazh: pull the commit-specific images, run migrations, restart, wait for health, and restore the previous application image configuration on failure. Database migrations are not automatically reversed.
 
 ## Security and limitations
 

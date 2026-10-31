@@ -1,15 +1,24 @@
-name: Publish container images
+name: Publish and deploy production images
+
 on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
+
 permissions:
   contents: read
-concurrency:
-  group: publish-${{ github.ref }}
-  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
 jobs:
   image:
+    name: Build ${{ matrix.target }} image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,33 +28,81 @@ jobs:
         target: [runner, migrations]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: repository
+      - id: image
         env:
           REPOSITORY: ${{ github.repository }}
-        run: echo "name=${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - id: meta
+        run: echo "name=${REGISTRY}/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ghcr.io/${{ steps.repository.outputs.name }}
-          flavor: suffix=${{ matrix.target == 'migrations' && '-migrations' || '' }},onlatest=true
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=false
+            suffix=${{ matrix.target == 'migrations' && '-migrations' || '' }},onlatest=true
           tags: |
-            type=raw,value=main,enable={{is_default_branch}}
-            type=ref,event=tag
-            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: ${{ matrix.target }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=${{ matrix.target }}
           provenance: mode=max
           sbom: true
+
+  deploy:
+    name: Deploy production images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: survey-production
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ vars.SURVEY_DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.SURVEY_DEPLOY_USER }}
+    steps:
+      - name: Check out deployment script
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Configure production SSH access
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SURVEY_DEPLOY_SSH_KEY }}
+          SSH_HOST_KEY: ${{ vars.SURVEY_DEPLOY_HOST_KEY }}
+        run: |
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_HOST_KEY"
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/survey_deploy
+          chmod 600 ~/.ssh/survey_deploy
+          printf '%s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
+      - name: Authorize registry pulls for this deployment
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s\n' "$GHCR_TOKEN" | ssh -i ~/.ssh/survey_deploy -o IdentitiesOnly=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+            "umask 077; mkdir -p /srv/applications/app-evaluation-survey/.registry; docker --config /srv/applications/app-evaluation-survey/.registry login ghcr.io --username '$GITHUB_ACTOR' --password-stdin"
+      - name: Pull, migrate, and deploy immutable images
+        run: |
+          image_tag="sha-${GITHUB_SHA::7}"
+          ssh -i ~/.ssh/survey_deploy -o IdentitiesOnly=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash -s -- '$image_tag'" < scripts/deploy-production.sh
