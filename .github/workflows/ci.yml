@@ -1,0 +1,50 @@
+name: Continuous integration
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_USER: survey
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: survey_test
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready -U survey -d survey_test" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DATABASE_URL: postgres://survey:ci-only-password@localhost:5432/survey_test
+      TEST_DATABASE_URL: postgres://survey:ci-only-password@localhost:5432/survey_test
+      PAYLOAD_SECRET: ci-only-secret-which-is-at-least-32-characters
+      SERVER_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: '1'
+      E2E_ADMIN_EMAIL: admin@example.org
+      E2E_ADMIN_PASSWORD: integration-password-at-least-16
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.2'
+      - run: npm install --global bun@1.4.2
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run migrate
+      - run: bun run test:integration
+      - run: bun run build
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e

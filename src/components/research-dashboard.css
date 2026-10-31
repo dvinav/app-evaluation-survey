@@ -1,0 +1,83 @@
+.research-dashboard {
+  padding: 24px var(--gutter-h);
+  margin-bottom: 32px;
+  border-bottom: 1px solid var(--theme-elevation-150);
+}
+.research-dashboard p {
+  max-width: 80ch;
+  line-height: 1.8;
+  text-align: justify;
+  text-justify: inter-word;
+  text-align-last: start;
+}
+.research-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: end;
+  margin-block: 24px;
+}
+.research-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.research-filters input,
+.research-filters select,
+.research-filters button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--theme-elevation-200);
+  background: var(--theme-elevation-50);
+  color: var(--theme-text);
+  border-radius: 4px;
+  font: inherit;
+}
+.research-filters button {
+  cursor: pointer;
+}
+.research-table-scroll {
+  overflow-x: auto;
+}
+.research-dashboard table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.research-dashboard td,
+.research-dashboard th {
+  text-align: start;
+  padding: 12px;
+  border-bottom: 1px solid var(--theme-elevation-150);
+}
+.research-dashboard thead th {
+  white-space: nowrap;
+}
+.research-dashboard small {
+  display: block;
+  font-weight: normal;
+  max-width: 24ch;
+}
+.research-filters input,
+.research-filters select,
+.research-filters button {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    outline-color 150ms ease-out,
+    opacity 150ms ease-out;
+}
+.research-filters :is(input, select, button):focus-visible {
+  outline-color: #6094ff;
+  border-color: #2563eb;
+}
+.research-filters button:hover {
+  background: var(--theme-elevation-150);
+}
+@media (prefers-reduced-motion: reduce) {
+  .research-filters :is(input, select, button) {
+    transition: none;
+  }
+}
