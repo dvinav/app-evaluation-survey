@@ -27,7 +27,7 @@ jobs:
       matrix:
         target: [runner, migrations]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: image
         env:
           REPOSITORY: ${{ github.repository }}
@@ -81,7 +81,7 @@ jobs:
       DEPLOY_USER: ${{ vars.SURVEY_DEPLOY_USER }}
     steps:
       - name: Check out deployment script
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Configure production SSH access
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SURVEY_DEPLOY_SSH_KEY }}
