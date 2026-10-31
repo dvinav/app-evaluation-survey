@@ -54,7 +54,7 @@
     "@types/pg": "^8.16.0",
     "tailwindcss": "^4.2.1",
     "@tailwindcss/postcss": "^4.2.1",
-    "eslint": "^9.39.2",
+    "eslint": "^10.13.0",
     "eslint-config-next": "16.4.3",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.7.2",
