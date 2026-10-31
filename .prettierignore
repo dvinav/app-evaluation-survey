@@ -1,0 +1,11 @@
+.next
+node_modules
+bun.lock
+src/payload-types.ts
+src/app/(payload)/admin/importMap.js
+playwright-report
+test-results
+coverage
+media
+
+next-env.d.ts
