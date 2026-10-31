@@ -1,0 +1,142 @@
+name: Build, publish, and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never interrupt a deployment while it is applying database migrations.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+
+  publish:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && !github.event.repository.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      app-digest: ${{ steps.app.outputs.digest }}
+      migration-digest: ${{ steps.migrations.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set image repository
+        id: image
+        run: echo "repository=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish application image
+        id: app
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: runner
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.repository }}:main
+            ${{ steps.image.outputs.repository }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+          provenance: mode=min
+          sbom: true
+      - name: Publish migration image
+        id: migrations
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: migrations
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.repository }}:main-migrations
+            ${{ steps.image.outputs.repository }}:sha-${{ github.sha }}-migrations
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=migrations
+          cache-to: type=gha,mode=max,scope=migrations
+          provenance: mode=min
+          sbom: true
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      packages: read
+    steps:
+      - name: Pull images, migrate, and start the application
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+          APP_DIGEST: ${{ needs.publish.outputs.app-digest }}
+          MIGRATION_DIGEST: ${{ needs.publish.outputs.migration-digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing production secret: $name"
+              exit 1
+            fi
+          done
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "${DEPLOY_PORT:-22}" =~ ^[0-9]{1,5}$ ]]
+          [[ "$APP_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$MIGRATION_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$REGISTRY_USER" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*(\[bot\])?$ ]]
+          umask 077
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/deploy-ssh.XXXXXX")
+          trap 'rm -rf "$ssh_dir"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          printf '%s' "$GHCR_TOKEN" | ssh -T \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -i "$ssh_dir/key" -p "${DEPLOY_PORT:-22}" \
+            -- "$DEPLOY_USER@$DEPLOY_HOST" \
+            "deploy $APP_DIGEST $MIGRATION_DIGEST $REGISTRY_USER"

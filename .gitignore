@@ -11,3 +11,11 @@ test-results/
 .DS_Store
 
 /backups/
+
+# Deployment credentials belong outside this public repository.
+.ssh/
+*.pem
+*.key
+*_ed25519
+*.known_hosts
+compose.server.yaml

@@ -142,7 +142,7 @@ Scores are descriptive means of separately reverse-adjusted answers, first per r
 
 Use the [deployment guide](docs/DEPLOYMENT.md) for local Docker builds, GHCR image publication, production Compose, administrator setup, migrations, encrypted backups, restoration, and pull/restart updates. Production uses a non-root Node.js standalone image and persistent database/media volumes. Maintenance runs from a separate matching image, before application startup.
 
-The CI workflow checks formatting, lint, types, unit and database tests, production build, and Chromium flows. The publishing workflow runs on `main` and `v*` tags with restricted package-write permissions and verified commit-pinned actions. It publishes application and maintenance tags; no deployment host or SSH secrets are assumed.
+The GitHub workflow checks formatting, lint, types, and unit tests on pull requests. On `main`, it also builds and publishes application and maintenance images to GHCR, then deploys their exact digests through a restricted SSH key. Production connection details live in Actions secrets; application secrets stay on the server. See the [Actions setup and deployment guide](docs/DEPLOYMENT.md#github-actions-setup) for required secrets and manual configuration.
 
 ## Security and limitations
 
